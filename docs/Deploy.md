@@ -309,6 +309,7 @@ tar -Jxvf Python-3.8.16.tar.xz
 
 # 安装
 cd Python-3.8.16
+sudo apt-get install libffi-dev
 ./configure --with-ssl --enable-optimizations
 make && sudo make install
 
