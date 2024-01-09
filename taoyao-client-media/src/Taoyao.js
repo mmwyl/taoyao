@@ -7,19 +7,20 @@ const WebSocket = require("ws");
  * 信令协议
  */
 const protocol = {
+
   // 当前索引
   index      : 0,
   // 最大索引
   maxIndex   : 999,
   // 终端索引
   clientIndex: 99999,
+
   /**
    * @returns 索引
    */
   buildId() {
-    const me = this;
-    if (++me.index > me.maxIndex) {
-      me.index = 0;
+    if (++this.index > this.maxIndex) {
+      this.index = 0;
     }
     const date = new Date();
     return (
@@ -27,10 +28,11 @@ const protocol = {
       1000000000000   * date.getHours()   +
       10000000000     * date.getMinutes() +
       100000000       * date.getSeconds() +
-      1000            * me.clientIndex    +
-      me.index
+      1000            * this.clientIndex  +
+      this.index
     );
   },
+
   /**
    * @param {*} signal 信令标识
    * @param {*} body   消息主体
@@ -40,11 +42,10 @@ const protocol = {
    * @returns 信令消息
    */
   buildMessage(signal, body = {}, id, v) {
-    const me = this;
     const message = {
       header: {
         v     : v  || config.signal.version,
-        id    : id || me.buildId(),
+        id    : id || this.buildId(),
         signal: signal,
       },
       body: body,
@@ -56,12 +57,13 @@ const protocol = {
 /**
  * 名称冲突
  */
- const taoyaoProtocol = protocol;
+const taoyaoProtocol = protocol;
 
 /**
  * 信令通道
  */
 const signalChannel = {
+
   // 桃夭信令
   taoyao : null,
   // 信令通道
@@ -84,34 +86,35 @@ const signalChannel = {
   minReconnectionDelay: 5 * 1000,
   // 最大重连时间
   maxReconnectionDelay: 30 * 1000,
+
   /**
    * 心跳
    */
   heartbeat() {
-    const me = this;
-    if (me.heartbeatTimer) {
-      clearTimeout(me.heartbeatTimer);
+    if (this.heartbeatTimer) {
+      clearTimeout(this.heartbeatTimer);
     }
-    me.heartbeatTimer = setTimeout(async () => {
-      if (me.connected()) {
-        me.taoyao.push(protocol.buildMessage("client::heartbeat", {
+    this.heartbeatTimer = setTimeout(async () => {
+      if (this.connected()) {
+        this.taoyao.push(protocol.buildMessage("client::heartbeat", {
           // TODO：电池信息
           battery : 100,
           charging: true,
         }));
-        me.heartbeat();
+        this.heartbeat();
       } else {
-        console.warn("心跳失败", me.address);
+        console.warn("心跳失败", this.address);
       }
-    }, me.heartbeatTime);
+    }, this.heartbeatTime);
   },
+
   /**
    * @returns 是否连接成功
    */
   connected() {
-    const me = this;
-    return me.channel && me.channel.readyState === WebSocket.OPEN;
+    return this.channel && this.channel.readyState === WebSocket.OPEN;
   },
+
   /**
    * 连接信令
    *
@@ -121,20 +124,24 @@ const signalChannel = {
    * @returns Promise<WebSocket>
    */
   async connect(address, reconnection = true) {
-    const me = this;
-    if (me.connected()) {
+    if (this.connected()) {
+      this.taoyao.connect = true;
       return new Promise((resolve, reject) => {
-        resolve(me.channel);
+        resolve(this.channel);
       });
+    } else {
+      this.taoyao.connect = false;
     }
-    me.address      = address;
-    me.reconnection = reconnection;
+    this.address      = address;
+    this.reconnection = reconnection;
     return new Promise((resolve, reject) => {
-      console.debug("连接信令通道", me.address);
-      me.channel = new WebSocket(me.address, { rejectUnauthorized: false, handshakeTimeout: 5000 });
-      me.channel.on("open", async () => {
-        console.info("打开信令通道", me.address);
-        const { body } = await me.taoyao.request(protocol.buildMessage("client::register", {
+      console.debug("连接信令通道", this.address);
+      this.channel = new WebSocket(this.address, { rejectUnauthorized: false, handshakeTimeout: 5000 });
+      this.channel.on("open", async () => {
+        console.debug("打开信令通道", this.address);
+        const {
+          body
+        } = await this.taoyao.request(protocol.buildMessage("client::register", {
           name      : config.signal.name,
           clientId  : config.signal.clientId,
           clientType: config.signal.clientType,
@@ -144,84 +151,81 @@ const signalChannel = {
           battery   : 100,
           charging  : true,
         }));
-        protocol.clientIndex = body.index;
-        console.info("终端注册成功", protocol.clientIndex);
-        me.reconnectionTimeout = me.minReconnectionDelay;
-        me.taoyao.connect      = true;
-        me.heartbeat();
-        resolve(me.channel);
+        protocol.clientIndex     = body.index;
+        this.taoyao.connect      = true;
+        this.reconnectionTimeout = this.minReconnectionDelay;
+        console.debug("终端注册成功", protocol.clientIndex);
+        this.heartbeat();
+        resolve(this.channel);
       });
-      me.channel.on("close", async () => {
-        console.warn("信令通道关闭", me.address);
-        me.taoyao.connect = false;
-        if(!me.connected()) {
-          me.taoyao.closeAllRoom();
-        }
-        if (me.reconnection) {
-          me.reconnect();
+      this.channel.on("close", async () => {
+        console.warn("信令通道关闭", this.address);
+        this.taoyao.connect = false;
+        this.taoyao.closeAllRoom();
+        if (this.reconnection) {
+          this.reconnect();
         }
         // 不要失败回调
       });
-      me.channel.on("error", async (e) => {
-        console.error("信令通道异常", me.address, e);
+      this.channel.on("error", async (e) => {
+        console.error("信令通道异常", this.address, e);
         // 不要失败回调
       });
-      me.channel.on("message", async (data) => {
+      this.channel.on("message", async (data) => {
         const content = data.toString();
         try {
           console.debug("信令通道消息", content);
-          me.taoyao.on(JSON.parse(content));
+          this.taoyao.on(JSON.parse(content));
         } catch (error) {
           console.error("处理信令通道消息异常", content, error);
         }
       });
     });
   },
+
   /**
    * 重连信令
    */
   reconnect() {
-    const me = this;
-    if (
-      me.lockReconnect  ||
-      me.taoyao.connect ||
-      me.connected()
-    ) {
+    if (this.connected() || this.lockReconnect) {
       return;
     }
-    me.lockReconnect = true;
-    if (me.reconnectTimer) {
-      clearTimeout(me.reconnectTimer);
+    this.lockReconnect = true;
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
     }
     // 定时重连
-    me.reconnectTimer = setTimeout(() => {
-      console.info("重连信令通道", me.address);
-      me.connect(me.address, me.reconnection);
-      me.lockReconnect = false;
-    }, me.reconnectionTimeout);
-    me.reconnectionTimeout = Math.min(
-      me.reconnectionTimeout + me.minReconnectionDelay,
-      me.maxReconnectionDelay
+    this.reconnectTimer = setTimeout(() => {
+      console.debug("重连信令通道", this.address);
+      this.connect(this.address, this.reconnection);
+      this.lockReconnect = false;
+    }, this.reconnectionTimeout);
+    // 设置重连时间
+    this.reconnectionTimeout = Math.min(
+      this.reconnectionTimeout + this.minReconnectionDelay,
+      this.maxReconnectionDelay
     );
   },
+
   /**
    * 关闭通道
    */
   close() {
-    const me = this;
-    console.info("关闭信令通道", me.address);
-    clearTimeout(me.heartbeatTimer);
-    clearTimeout(me.reconnectTimer);
-    me.reconnection   = false;
-    me.taoyao.connect = false;
-    me.channel.close();
+    console.debug("关闭信令通道", this.address);
+    clearTimeout(this.heartbeatTimer);
+    clearTimeout(this.reconnectTimer);
+    this.reconnection   = false;
+    this.taoyao.connect = false;
+    this.channel.close();
   },
+
 };
 
 /**
  * 房间
  */
 class Room {
+  
   // 是否关闭
   close  = null;
   // 房间ID
@@ -267,6 +271,7 @@ class Room {
     this.handleAudioLevelObserver();
     this.handleActiveSpeakerObserver();
   }
+
   /**
    * 音量监控
    */
@@ -298,6 +303,7 @@ class Room {
     });
     // this.audioLevelObserver.observer.on("volumes", (volumes) => {});
   }
+
   /**
    * 当前讲话终端监控
    */
@@ -309,44 +315,45 @@ class Room {
     });
     // this.activeSpeakerObserver.observer.on("dominantspeaker", (dominantSpeaker) => {});
   }
+
   /**
    * 房间使用情况
    */
   usage() {
-    const me = this;
-    console.info("房间标识",          me.roomId);
-    console.info("房间媒体通道数量",   me.transports.size);
-    console.info("房间媒体生产者数量", me.producers.size);
-    console.info("房间媒体消费者数量", me.consumers.size);
-    console.info("房间数据生产者数量", me.dataProducers.size);
-    console.info("房间数据消费者数量", me.dataConsumers.size);
+    console.info("房间标识",          this.roomId);
+    console.info("房间媒体通道数量",   this.transports.size);
+    console.info("房间媒体生产者数量", this.producers.size);
+    console.info("房间媒体消费者数量", this.consumers.size);
+    console.info("房间数据生产者数量", this.dataProducers.size);
+    console.info("房间数据消费者数量", this.dataConsumers.size);
   }
 
   /**
    * 关闭房间
    */
   closeAll() {
-    const me = this;
-    if (me.close) {
+    if (this.close) {
       return;
     }
-    console.info("关闭房间", me.roomId);
-    me.close = true;
-    me.audioLevelObserver.close();
-    me.activeSpeakerObserver.close();
-    me.consumers.forEach(v => v.close());
-    me.producers.forEach(v => v.close());
-    me.dataConsumers.forEach(v => v.close());
-    me.dataProducers.forEach(v => v.close());
-    me.transports.forEach(v => v.close());
-    me.mediasoupRouter.close();
+    console.info("关闭房间", this.roomId);
+    this.close = true;
+    this.audioLevelObserver.close();
+    this.activeSpeakerObserver.close();
+    this.consumers.forEach(v => v.close());
+    this.producers.forEach(v => v.close());
+    this.dataConsumers.forEach(v => v.close());
+    this.dataProducers.forEach(v => v.close());
+    this.transports.forEach(v => v.close());
+    this.mediasoupRouter.close();
   }
+
 };
 
 /**
  * 桃夭信令
  */
 class Taoyao {
+
   // 是否连接
   connect = false;
   // 房间列表：房间ID=房间
@@ -373,119 +380,125 @@ class Taoyao {
    * @param {*} message 消息
    */
   on(message) {
-    const me = this;
     // 解构
-    const { code, header, body } = message;
-    const { id, signal }         = header;
+    const {
+      code,
+      header,
+      body
+    } = message;
+    const {
+      id,
+      signal
+    } = header;
     if(code !== "0000") {
       console.warn("信令错误", message);
     }
     // 请求回调
-    if (me.callbackMapping.has(id)) {
+    if (this.callbackMapping.has(id)) {
       try {
-        me.callbackMapping.get(id)(message);
+        this.callbackMapping.get(id)(message);
       } finally {
-        me.callbackMapping.delete(id);
+        this.callbackMapping.delete(id);
       }
       return;
     }
     // 执行信令
     switch (signal) {
       case "client::reboot":
-        me.clientReboot(message, body);
+        this.clientReboot(message, body);
         break;
       case "client::shutdown":
-        me.clientShutdown(message, body);
+        this.clientShutdown(message, body);
         break;
       case "control::server::record":
-        me.controlServerRecord(message, body);
+        this.controlServerRecord(message, body);
         break;
       case "media::consume":
-        me.mediaConsume(message, body);
+        this.mediaConsume(message, body);
         break;
       case "media::consumer::close":
-        me.mediaConsumerClose(message, body);
+        this.mediaConsumerClose(message, body);
         break;
       case "media::consumer::pause":
-        me.mediaConsumerPause(message, body);
+        this.mediaConsumerPause(message, body);
         break;
       case "media::consumer::request::key::frame":
-        me.mediaConsumerRequestKeyFrame(message, body);
+        this.mediaConsumerRequestKeyFrame(message, body);
         break;
       case "media::consumer::resume":
-        me.mediaConsumerResume(message, body);
+        this.mediaConsumerResume(message, body);
         break;
       case "media::consumer::set::preferred::layers":
-        me.mediaConsumerSetPreferredLayers(message, body);
+        this.mediaConsumerSetPreferredLayers(message, body);
         break;
       case "media::consumer::set::priority":
-        me.mediaConsumerSetPriority(message, body);
+        this.mediaConsumerSetPriority(message, body);
         break;
       case "media::consumer::status":
-        me.mediaConsumerStatus(message, body);
+        this.mediaConsumerStatus(message, body);
         break;
       case "media::data::consume":
-        me.mediaDataConsume(message, body);
+        this.mediaDataConsume(message, body);
         break;
       case "media::data::consumer::close":
-        me.mediaDataConsumerClose(message, body);
+        this.mediaDataConsumerClose(message, body);
         break;
       case "media::data::consumer::status":
-        me.mediaDataConsumerStatus(message, body);
+        this.mediaDataConsumerStatus(message, body);
         break;
       case "media::data::produce":
-        me.mediaDataProduce(message, body);
+        this.mediaDataProduce(message, body);
         break;
       case "media::data::producer::close":
-        me.mediaDataProducerClose(message, body);
+        this.mediaDataProducerClose(message, body);
         break;
       case "media::data::producer::status":
-        me.mediaDataProducerStatus(message, body);
+        this.mediaDataProducerStatus(message, body);
         break;
       case "media::ice::restart":
-        me.mediaIceRestart(message, body);
+        this.mediaIceRestart(message, body);
         break;
       case "media::produce":
-        me.mediaProduce(message, body);
+        this.mediaProduce(message, body);
         break;
       case "media::producer::close":
-        me.mediaProducerClose(message, body);
+        this.mediaProducerClose(message, body);
         break;
       case "media::producer::pause":
-        me.mediaProducerPause(message, body);
+        this.mediaProducerPause(message, body);
         break;
       case "media::producer::resume":
-        me.mediaProducerResume(message, body);
+        this.mediaProducerResume(message, body);
         break;
       case "media::producer::status":
-        me.mediaProducerStatus(message, body);
+        this.mediaProducerStatus(message, body);
         break;
       case "media::router::rtp::capabilities":
-        me.mediaRouterRtpCapabilities(message, body);
+        this.mediaRouterRtpCapabilities(message, body);
         break;
       case "media::transport::close":
-        me.mediaTransportClose(message, body);
+        this.mediaTransportClose(message, body);
         break;
       case "media::transport::plain::create":
-        me.mediaTransportPlainCreate(message, body);
+        this.mediaTransportPlainCreate(message, body);
         break;
       case "media::transport::status":
-        me.mediaTransportStatus(message, body);
+        this.mediaTransportStatus(message, body);
         break;
       case "media::transport::webrtc::connect":
-        me.mediaTransportWebrtcConnect(message, body);
+        this.mediaTransportWebrtcConnect(message, body);
         break;
       case "media::transport::webrtc::create":
-        me.mediaTransportWebrtcCreate(message, body);
+        this.mediaTransportWebrtcCreate(message, body);
         break;
       case "platform::error":
-        me.platformError(message, body);
+        this.platformError(message, body);
         break;
       case "room::close":
-        me.roomClose(message, body);
+        this.roomClose(message, body);
         break;
       case "room::create":
-        me.roomCreate(message, body);
+        this.roomCreate(message, body);
         break;
     }
   }
@@ -511,17 +524,16 @@ class Taoyao {
    * @returns Promise
    */
   async request(message) {
-    const me = this;
     return new Promise((resolve, reject) => {
       const { header, body } = message;
       const { id }           = header;
       // 设置超时
       const rejectTimeout = setTimeout(() => {
-        me.callbackMapping.delete(id);
+        this.callbackMapping.delete(id);
         reject("请求超时", message);
       }, 5000);
       // 请求回调
-      me.callbackMapping.set(id, (response) => {
+      this.callbackMapping.set(id, (response) => {
         resolve(response);
         clearTimeout(rejectTimeout);
         return true;
@@ -539,23 +551,21 @@ class Taoyao {
    * 打印日志
    */
   async usage() {
-    const me = this;
-    for (const worker of me.mediasoupWorkers) {
+    for (const worker of this.mediasoupWorkers) {
       const usage = await worker.getResourceUsage();
       console.info("工作线程使用情况", worker.pid, usage);
     }
-    console.info("工作线程数量", me.mediasoupWorkers.length);
-    console.info("现存房间数量", me.rooms.size);
-    Array.from(me.rooms.values()).forEach((room) => room.usage());
+    console.info("工作线程数量", this.mediasoupWorkers.length);
+    console.info("现存房间数量", this.rooms.size);
+    Array.from(this.rooms.values()).forEach((room) => room.usage());
   }
 
   /**
    * @returns 下个工作线程
    */
   nextMediasoupWorker() {
-    const me = this;
-    const worker = me.mediasoupWorkers[me.nextMediasoupWorkerIndex];
-    me.nextMediasoupWorkerIndex = ++me.nextMediasoupWorkerIndex % me.mediasoupWorkers.length;
+    const worker = this.mediasoupWorkers[this.nextMediasoupWorkerIndex];
+    this.nextMediasoupWorkerIndex = ++this.nextMediasoupWorkerIndex % this.mediasoupWorkers.length;
     return worker;
   }
   
@@ -926,7 +936,7 @@ class Taoyao {
           // consumer.on("trace", (trace) => {
           //   console.debug("消费者跟踪事件（trace）", consumer.id, streamId, trace);
           // });
-          // 等待终端准备就绪：可以不用等待直接使用push方法
+          // 等待终端准备就绪：必须等待就绪不然容易导致SSRC重复异常
           await this.request(protocol.buildMessage("media::consume", {
             roomId,
             clientId,
